@@ -1,0 +1,162 @@
+# Ruff Configuration for FastAPI Backend Template
+# Documentation: https://docs.astral.sh/ruff/
+
+[project]
+name = "fastapi-1password-template"
+version = "0.1.0"
+description = "A FastAPI backend template with 1Password secrets management"
+requires-python = ">=3.12"
+
+# Production dependencies - minimal packages needed to run the application
+dependencies = [
+    "fastapi>=0.115.0",
+    "gunicorn>=23.0.0",
+    "httpx>=0.27.0",
+    "psycopg[pool]>=3.2.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "pyjwt>=2.9.0",
+    "python-sentry-logger-wrapper",
+    "sqlalchemy>=2.0.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[tool.ruff]
+# Line length to match Black default
+line-length = 88
+
+# Target Python 3.12
+target-version = "py312"
+
+# Exclude common directories
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "*.egg-info",
+    "alembic/versions/",
+    "alembic/env.py",
+]
+
+[tool.ruff.lint]
+# Enable comprehensive linting rules
+select = [
+    "F",   # Pyflakes (unused imports, undefined names) - CRITICAL
+    "E",   # Pycodestyle errors (PEP 8 violations)
+    "W",   # Pycodestyle warnings
+    "I",   # Import sorting (isort replacement)
+    "N",   # PEP8 naming conventions
+    "UP",  # Pyupgrade (modern Python syntax)
+    "B",   # Flake8-bugbear (common bugs) - CRITICAL
+    "C4",  # Flake8-comprehensions
+    "SIM", # Flake8-simplify
+]
+
+# Ignore specific rules that conflict with our patterns
+ignore = [
+    "E501",  # Line too long (formatter handles this)
+    "B008",  # Do not perform function call in argument defaults (FastAPI Depends pattern)
+    "B024",  # BaseDAO is intentionally an ABC without abstract methods (provides shared implementation)
+]
+
+# Per-file rule customization
+[tool.ruff.lint.per-file-ignores]
+# Allow assert statements and star imports in tests
+"tests/*" = ["S101", "F403", "F405"]
+
+# Alembic migrations may have unused imports
+"alembic/versions/*" = ["F401"]
+
+# __init__.py files can have unused imports (re-exports)
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+# Import sorting configuration
+known-first-party = ["app"]
+
+[tool.ruff.format]
+# Formatting style preferences
+quote-style = "double"
+indent-style = "space"
+
+[tool.uv.sources]
+python-sentry-logger-wrapper = { git = "https://github.com/HEAL-Engineering/python-sentry-logger-wrapper", tag = "v0.2.0" }
+
+[dependency-groups]
+# Development and testing dependencies
+dev = [
+    "pre-commit>=4.3.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.6.0",
+]
+
+[tool.pytest.ini_options]
+# Pytest configuration with coverage defaults
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "integration: live integration tests that hit real third-party APIs (require explicit opt-in env vars)",
+]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--asyncio-mode=auto",
+    "--cov=app",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=xml:coverage.xml",
+    "--cov-report=html:htmlcov",
+]
+
+[tool.coverage.run]
+# Coverage.py runtime configuration
+source = ["app"]
+branch = true
+parallel = false
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/alembic/*",
+    "*/alembic/versions/*",
+    "*/.venv/*",
+    "*/venv/*",
+]
+
+[tool.coverage.report]
+# Coverage reporting configuration
+precision = 2
+show_missing = true
+skip_covered = false
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == '__main__':",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+    "class .*\\bProtocol\\):",
+    "\\.\\.\\.",
+]
+
+[tool.coverage.xml]
+# XML report configuration for CI/CD
+output = "coverage.xml"
+
+[tool.coverage.html]
+# HTML report configuration for local development
+directory = "htmlcov"
+show_contexts = false
