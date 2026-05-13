@@ -23,6 +23,8 @@ VAULT_PREFIX=""
 APP_NAME=""
 EXTERNAL_PORT=""
 OPTIONAL_SECTIONS=""
+OP_ACCOUNT=""
+OP_ACCOUNT_LABEL=""
 
 CREATED_VAULTS=()
 VAULT_ITEM_SUMMARY=()   # entries like "VAULT-NAME:N"
@@ -304,19 +306,12 @@ step_dep_check() {
 }
 
 # =============================================================================
-# Step 2 — 1Password sign-in
+# Step 2 — 1Password sign-in + account selection
 # =============================================================================
-step_op_signin() {
-    print_header "Step 2 — Sign in to 1Password"
-
+ensure_op_signed_in() {
     local attempt=1 max=3
     while [ $attempt -le $max ]; do
-        if op account list >/dev/null 2>&1; then
-            local who
-            who="$(op whoami --format json 2>/dev/null | jq -r '.email // empty' 2>/dev/null || true)"
-            if [ -n "$who" ]; then log_ok "Signed in as $who"; else log_ok "Signed in to 1Password"; fi
-            return 0
-        fi
+        if op account list >/dev/null 2>&1; then return 0; fi
 
         print_box "Sign in to 1Password CLI
 
@@ -339,6 +334,84 @@ You'll need:
 
     log_err "Could not sign in to 1Password after $max attempts."
     exit "$EXIT_OP_SIGNIN"
+}
+
+# Builds a vault-list peek for each account so accounts with identical email/URL
+# can still be told apart by the vaults visible inside them.
+prompt_op_account() {
+    local accounts_json count
+    accounts_json="$(op account list --format json 2>/dev/null || echo '[]')"
+    count="$(printf '%s' "$accounts_json" | jq 'length')"
+
+    if [ "$count" -eq 0 ]; then
+        log_err "No 1Password accounts are added to op. Run 'op account add' first."
+        exit "$EXIT_OP_SIGNIN"
+    fi
+
+    if [ "$count" -eq 1 ]; then
+        local email url uuid
+        email="$(printf '%s' "$accounts_json" | jq -r '.[0].email')"
+        url="$(  printf '%s' "$accounts_json" | jq -r '.[0].url')"
+        uuid="$( printf '%s' "$accounts_json" | jq -r '.[0].user_uuid')"
+        log_info "Found one 1Password account: $email @ $url"
+        if ! ask_confirm "Use this account?"; then
+            log_err "Aborted. Add or switch accounts via 'op account add', then re-run."
+            exit "$EXIT_OP_SIGNIN"
+        fi
+        OP_ACCOUNT="$uuid"
+        OP_ACCOUNT_LABEL="$email @ $url"
+        export OP_ACCOUNT
+        log_ok "Using $OP_ACCOUNT_LABEL"
+        return 0
+    fi
+
+    printf '\n%sMultiple 1Password accounts detected.%s Showing vaults in each so you can tell them apart:\n' "$C_BOLD" "$C_RESET" >&2
+
+    local uuids=() labels=()
+    local i email url uuid vaults short_uuid
+    for i in $(seq 0 $((count - 1))); do
+        email="$(printf '%s' "$accounts_json" | jq -r ".[$i].email")"
+        url="$(  printf '%s' "$accounts_json" | jq -r ".[$i].url")"
+        uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
+        short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
+
+        vaults="$(op vault list --account "$uuid" --format json 2>/dev/null \
+            | jq -r 'map(.name) | join(", ")' 2>/dev/null || true)"
+        if [ -z "$vaults" ]; then
+            vaults="(session inactive — run: op signin --account $uuid)"
+        elif [ "${#vaults}" -gt 90 ]; then
+            vaults="$(printf '%s' "$vaults" | cut -c1-87)..."
+        fi
+
+        uuids+=("$uuid")
+        labels+=("$email @ $url  [${short_uuid}]")
+
+        printf '\n  %d) %s @ %s  %s[%s]%s\n' "$((i + 1))" "$email" "$url" "$C_DIM" "$short_uuid" "$C_RESET" >&2
+        printf '       %svaults:%s %s\n' "$C_DIM" "$C_RESET" "$vaults" >&2
+    done
+
+    printf '\n' >&2
+    local choice
+    while :; do
+        read -r -p "Pick an account [1]: " choice
+        [ -z "$choice" ] && choice=1
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            break
+        fi
+        log_err "Enter a number 1-$count."
+    done
+
+    local idx=$((choice - 1))
+    OP_ACCOUNT="${uuids[$idx]}"
+    OP_ACCOUNT_LABEL="${labels[$idx]}"
+    export OP_ACCOUNT
+    log_ok "Using account: $OP_ACCOUNT_LABEL"
+}
+
+step_op_signin() {
+    print_header "Step 2 — Sign in to 1Password"
+    ensure_op_signed_in
+    prompt_op_account
 }
 
 # =============================================================================
@@ -426,9 +499,9 @@ section_enabled() {
 
 generate_jwt_secret() {
     if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32
+        openssl rand -hex 64
     else
-        head -c 32 /dev/urandom | xxd -p -c 256 | tr -d '\n'
+        head -c 64 /dev/urandom | xxd -p -c 256 | tr -d '\n'
     fi
 }
 
@@ -605,6 +678,7 @@ write_config() {
         printf 'APP_NAME=%s\n'    "$APP_NAME"
         printf 'EXTERNAL_PORT=%s\n' "$EXTERNAL_PORT"
         printf 'OPTIONAL_SECTIONS=%s\n' "$OPTIONAL_SECTIONS"
+        printf 'OP_ACCOUNT=%s\n' "$OP_ACCOUNT"
         printf 'WIZARD_VERSION=%s\n' "$WIZARD_VERSION"
         printf 'SETUP_DATE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         if [ "$mark_complete" = "1" ]; then
@@ -785,6 +859,7 @@ Vault prefix:     $VAULT_PREFIX
 App name:         $APP_NAME
 External port:    $EXTERNAL_PORT
 Optional groups:  ${OPTIONAL_SECTIONS:-(none)}
+1Password acct:   ${OP_ACCOUNT_LABEL:-(default)}
 
 Vaults:
 $vault_list
