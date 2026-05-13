@@ -443,40 +443,24 @@ step_op_signin() {
 # =============================================================================
 # Step 3 — Project config prompts
 # =============================================================================
-prompt_vault_prefix() {
-    local default val
-    default="${VAULT_PREFIX:-API-APP}"
-    log_info "Used to name your 1Password vaults: <PREFIX>-LOCAL, <PREFIX>-TEST, <PREFIX>-PROD"
-    while :; do
-        read -r -p "Change the vault prefix: " val
-        [ -z "$val" ] && val="$default"
-        if [[ ! "$val" =~ ^[A-Z0-9-]+$ ]]; then
-            log_err "Prefix must contain only uppercase letters, digits, and dashes."
-            continue
-        fi
-        if [ ${#val} -lt 3 ] || [ ${#val} -gt 30 ]; then
-            log_err "Prefix must be 3-30 characters."
-            continue
-        fi
-        if [ "$val" = "YOUR-PROJECT" ]; then
-            log_err "Pick a real project name, not the placeholder."
-            continue
-        fi
-        VAULT_PREFIX="$val"
-        return
-    done
-}
-
 prompt_app_name() {
     local default val
-    default="${APP_NAME:-$(printf '%s' "$VAULT_PREFIX" | tr '[:upper:]' '[:lower:]')}"
+    default="${APP_NAME:-api-app}"
+    log_info "Used as the Docker container prefix AND your 1Password vault prefix (uppercased)."
+    log_info "Example: 'api-app' → vault 'API-APP-LOCAL'"
     while :; do
-        val="$(ask_input "App name (kebab-case, used as Docker container prefix)" "$default")"
+        val="$(ask_input "App name (kebab-case)" "$default")"
         if [[ ! "$val" =~ ^[a-z0-9-]+$ ]]; then
             log_err "App name must be lowercase letters, digits, and dashes."
             continue
         fi
+        if [ ${#val} -lt 3 ] || [ ${#val} -gt 30 ]; then
+            log_err "App name must be 3-30 characters."
+            continue
+        fi
         APP_NAME="$val"
+        VAULT_PREFIX="$(printf '%s' "$val" | tr '[:lower:]' '[:upper:]')"
+        log_ok "Vault prefix: $VAULT_PREFIX (auto-derived)"
         return
     done
 }
@@ -504,7 +488,6 @@ prompt_optional_sections() {
 
 step_collect_config() {
     print_header "Step 3 — Project configuration"
-    prompt_vault_prefix
     prompt_app_name
     prompt_external_port
 
