@@ -4,88 +4,56 @@ Production-ready FastAPI backend template with 1Password secrets management, Pos
 
 ## Prerequisites
 
-- Docker
-- [Task](https://taskfile.dev/) - `brew install go-task`
-- [1Password CLI](https://1password.com/downloads/command-line/) - `brew install --cask 1password-cli`
+- macOS (Apple Silicon or Intel) — the setup wizard targets macOS
+- A 1Password account
+
+Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq, gum) is installed by the wizard.
 
 ## Quick Start
 
-### 1. Configure Project Settings
-
-Edit `Taskfile.yml` lines 11-13:
-
-```yaml
-vars:
-  APP_NAME: your-project        # Docker container prefix
-  EXTERNAL_PORT: "8000"         # Host port for API
-```
-
-Update your 1Password vault prefix in `scripts/generate-env.sh` line 7:
-
 ```bash
-VAULT_PREFIX="YOUR-PROJECT"  # → vaults: YOUR-PROJECT-LOCAL, YOUR-PROJECT-TEST, YOUR-PROJECT-PROD
+./setup.sh
 ```
 
-### 2. Set Up 1Password Vault
+The wizard walks you through:
 
-Create a vault named `{VAULT_PREFIX}-LOCAL` (e.g., `YOUR-PROJECT-LOCAL`) and add these items:
+1. Installing any missing tools (Homebrew, gum, 1Password CLI, jq, Task, Docker Desktop)
+2. Signing in to 1Password
+3. Picking a vault prefix, app name, and external port
+4. Auto-creating your three 1Password vaults (`{PREFIX}-LOCAL`, `-TEST`, `-PROD`)
+5. Seeding each vault with the required secrets (JWT key + DB password auto-generated)
+6. Wiring `scripts/generate-env.sh` and `Taskfile.yml` to your config
+7. Verifying end-to-end by generating `.env.local`
+8. Optionally detaching from the template's git history (fresh-start your project)
 
-#### Required Secrets
-
-| Item Title | Description | How to Generate |
-|------------|-------------|-----------------|
-| `JWT_SECRET_KEY` | Token signing key | `openssl rand -hex 32` |
-| `DB_HOST` | Database hostname | `localhost` (local) or `postgres` (Docker) |
-| `DB_USER` | Database username | e.g., `app_user` |
-| `DB_PASSWORD` | Database password | Strong password |
-| `DB_NAME` | Database name | e.g., `app_db` |
-
-#### Optional Secrets
-
-| Item Title | Default | Description |
-|------------|---------|-------------|
-| `ENVIRONMENT` | `development` | Environment name (`local`, `development`, `production`) |
-| `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `warning`, `error`) |
-| `DB_PORT` | `5432` | Database port |
-| `JWT_ALGORITHM` | `HS256` | JWT signing algorithm |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | Access token TTL (24 hours) |
-| `REFRESH_TOKEN_EXPIRE_MINUTES` | `43200` | Refresh token TTL (30 days) |
-
-#### Optional: Test Database
-
-| Item Title | Description |
-|------------|-------------|
-| `TEST_DB_HOST` | Test database host |
-| `TEST_DB_PORT` | Test database port (default: 5432) |
-| `TEST_DB_USER` | Test database user |
-| `TEST_DB_PASSWORD` | Test database password |
-| `TEST_DB_NAME` | Test database name |
-
-#### Optional: Sentry Monitoring
-
-| Item Title | Default | Description |
-|------------|---------|-------------|
-| `SENTRY_DSN` | None | Sentry project DSN |
-| `SENTRY_ENVIRONMENT` | None | Environment tag for Sentry |
-| `SENTRY_SAMPLE_RATE` | `1.0` | Trace sample rate (0.0-1.0) |
-| `SENTRY_SEND_PII` | `False` | Send PII to Sentry (keep `False`) |
-| `SENTRY_LOG_LEVEL` | `info` | Minimum level to send to Sentry |
-| `SENTRY_BREADCRUMBS_LEVEL` | `error` | Breadcrumb capture level |
-
-### 3. Generate Environment File
-
-```bash
-task env:setup     # First time: install 1Password CLI and sign in
-task env:generate  # Generate .env.local from 1Password vault
-```
-
-### 4. Start Development
+Once it finishes:
 
 ```bash
 task dev
 ```
 
-API available at `http://localhost:8000` (or your configured `EXTERNAL_PORT`).
+API is at `http://localhost:8000` (or your configured `EXTERNAL_PORT`) and `/docs` for the OpenAPI UI.
+
+### Re-running the wizard
+
+```bash
+./setup.sh                  # resume / re-run with prompts
+./setup.sh --update-vaults  # seed new items without re-prompting config
+./setup.sh --reset          # start over (does not delete vaults)
+./setup.sh --dry-run        # see what it would do without doing it
+./setup.sh --help           # all flags
+```
+
+### What gets seeded into each vault
+
+**Required (always):** `JWT_SECRET_KEY`, `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+
+**Optional (you choose):**
+- `test` — `TEST_DB_HOST`, `TEST_DB_PORT`, `TEST_DB_USER`, `TEST_DB_PASSWORD`, `TEST_DB_NAME`
+- `sentry` — `SENTRY_DSN`, `SENTRY_ENVIRONMENT`
+- `config` — `ENVIRONMENT`, `LOG_LEVEL`, `DB_PORT`
+
+The wizard auto-generates strong values for `JWT_SECRET_KEY` and any `DB_PASSWORD` (you can override). Everything else has sensible defaults you can accept or edit.
 
 ## Commands
 

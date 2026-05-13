@@ -2,10 +2,15 @@
 set -euo pipefail
 
 # =============================================================================
-# CONFIGURATION - Modify vault prefix for your project
+# CONFIGURATION — VAULT_PREFIX is sourced from .setup.config (written by ./setup.sh)
 # =============================================================================
-VAULT_PREFIX="YOUR-PROJECT"
-# Vaults expected: YOUR-PROJECT-LOCAL, YOUR-PROJECT-TEST, YOUR-PROJECT-PROD
+# SETUP_WIZARD_MANAGED — do not hardcode VAULT_PREFIX here; run ./setup.sh.
+_SETUP_CONFIG="$(cd "$(dirname "$0")/.." && pwd)/.setup.config"
+if [ -f "$_SETUP_CONFIG" ]; then
+    set -a; . "$_SETUP_CONFIG"; set +a
+fi
+: "${VAULT_PREFIX:?VAULT_PREFIX not set — run ./setup.sh first to configure}"
+# Vaults expected: ${VAULT_PREFIX}-LOCAL, ${VAULT_PREFIX}-TEST, ${VAULT_PREFIX}-PROD
 # =============================================================================
 
 ENV="${1:-local}"
