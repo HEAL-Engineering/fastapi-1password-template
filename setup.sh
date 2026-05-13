@@ -365,10 +365,32 @@ prompt_op_account() {
         return 0
     fi
 
-    printf '\n%sMultiple 1Password accounts detected.%s Showing vaults in each so you can tell them apart:\n' "$C_BOLD" "$C_RESET" >&2
+    printf '\n%sMultiple 1Password accounts detected.%s\n' "$C_BOLD" "$C_RESET" >&2
 
-    local uuids=() labels=()
-    local i email url uuid vaults short_uuid
+    # Pre-flight: any account whose session is locked can't list vaults. Offer
+    # to unlock so the picker can disambiguate accounts that share email+URL.
+    local i uuid email url short_uuid locked_any=0
+    for i in $(seq 0 $((count - 1))); do
+        uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
+        if op vault list --account "$uuid" >/dev/null 2>&1; then continue; fi
+
+        email="$(    printf '%s' "$accounts_json" | jq -r ".[$i].email")"
+        url="$(      printf '%s' "$accounts_json" | jq -r ".[$i].url")"
+        short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
+        locked_any=1
+
+        log_warn "Account [$short_uuid] $email @ $url is locked."
+        if ask_confirm "Unlock it now (Touch ID / master password) to show its vaults?"; then
+            if ! op signin --account "$uuid" >/dev/null 2>&1; then
+                log_warn "Unlock failed — this account will show without vault info."
+            fi
+        fi
+    done
+    [ "$locked_any" -eq 1 ] && printf '\n' >&2
+
+    printf 'Showing vaults in each account so you can tell them apart:\n' >&2
+
+    local uuids=() labels=() vaults
     for i in $(seq 0 $((count - 1))); do
         email="$(printf '%s' "$accounts_json" | jq -r ".[$i].email")"
         url="$(  printf '%s' "$accounts_json" | jq -r ".[$i].url")"
@@ -378,7 +400,7 @@ prompt_op_account() {
         vaults="$(op vault list --account "$uuid" --format json 2>/dev/null \
             | jq -r 'map(.name) | join(", ")' 2>/dev/null || true)"
         if [ -z "$vaults" ]; then
-            vaults="(session inactive — run: op signin --account $uuid)"
+            vaults="(locked — vaults hidden)"
         elif [ "${#vaults}" -gt 90 ]; then
             vaults="$(printf '%s' "$vaults" | cut -c1-87)..."
         fi
