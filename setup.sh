@@ -6,7 +6,6 @@
 # (task env:generate, task dev, etc.).
 #
 #   ./setup.sh             run setup (warns if .setup.config already exists)
-#   ./setup.sh --no-gum    force plain-text prompts (no gum required)
 #   ./setup.sh --help      show this help
 # =============================================================================
 set -euo pipefail
@@ -19,7 +18,6 @@ CONFIG_FILE="${REPO_ROOT}/.setup.config"
 GENERATE_ENV_SCRIPT="${REPO_ROOT}/scripts/generate-env.sh"
 TASKFILE="${REPO_ROOT}/Taskfile.yml"
 WIZARD_VERSION=1
-PLAIN_MODE=0
 
 VAULT_PREFIX=""
 APP_NAME=""
@@ -51,132 +49,97 @@ C_BLUE=$'\033[34m'
 C_CYAN=$'\033[36m'
 
 # =============================================================================
-# UI wrappers — gum if available, plain bash otherwise
+# UI helpers — plain bash + ANSI colors (no TUI libraries)
 # =============================================================================
-have_gum() { [ "$PLAIN_MODE" -eq 0 ] && command -v gum >/dev/null 2>&1; }
-
-gum_confirm() {
-    local prompt="$1"
-    if have_gum; then
-        gum confirm "$prompt"
-    else
-        local ans
-        read -r -p "$prompt [y/N] " ans
-        case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
-    fi
+ask_confirm() {
+    local prompt="$1" ans
+    read -r -p "$prompt [y/N] " ans
+    case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
-gum_input() {
-    local label="$1" default_val="${2:-}"
-    if have_gum; then
-        gum input --prompt "$label » " --value "$default_val"
+ask_input() {
+    local label="$1" default_val="${2:-}" ans
+    if [ -n "$default_val" ]; then
+        read -r -p "$label [$default_val]: " ans
+        [ -z "$ans" ] && ans="$default_val"
     else
-        local ans
-        if [ -n "$default_val" ]; then
-            read -r -p "$label [$default_val]: " ans
-            [ -z "$ans" ] && ans="$default_val"
-        else
-            read -r -p "$label: " ans
-        fi
-        printf '%s' "$ans"
+        read -r -p "$label: " ans
     fi
+    printf '%s' "$ans"
 }
 
-gum_password() {
-    local label="$1"
-    if have_gum; then
-        gum input --prompt "$label » " --password
-    else
-        local ans
-        read -r -s -p "$label: " ans
-        printf '\n' >&2
-        printf '%s' "$ans"
-    fi
+ask_password() {
+    local label="$1" ans
+    read -r -s -p "$label: " ans
+    printf '\n' >&2
+    printf '%s' "$ans"
 }
 
-gum_choose() {
+ask_choose() {
+    # Usage: ask_choose "Prompt" "opt1" "opt2" ...   → prints chosen option to stdout
     local label="$1"; shift
-    if have_gum; then
-        gum choose --header "$label" "$@"
-    else
-        printf '%s\n' "$label" >&2
-        local i=1
-        for opt in "$@"; do
-            printf '  %d) %s\n' "$i" "$opt" >&2
-            i=$((i + 1))
-        done
-        local choice
-        read -r -p "Choice [1]: " choice
-        [ -z "$choice" ] && choice=1
-        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt $# ]; then
-            choice=1
-        fi
-        printf '%s' "${!choice}"
+    printf '\n%s\n' "$label" >&2
+    local i=1
+    for opt in "$@"; do
+        printf '  %d) %s\n' "$i" "$opt" >&2
+        i=$((i + 1))
+    done
+    local choice
+    read -r -p "Choice [1]: " choice
+    [ -z "$choice" ] && choice=1
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt $# ]; then
+        choice=1
     fi
+    printf '%s' "${!choice}"
 }
 
-gum_multichoose() {
+ask_multichoose() {
+    # Usage: ask_multichoose "Prompt" "opt1" "opt2" ...   → prints chosen options, one per line
     local label="$1"; shift
-    if have_gum; then
-        gum choose --no-limit --header "$label" "$@" || true
-    else
-        printf '%s\n' "$label" >&2
-        printf '%s\n' "(comma-separated numbers, or empty for none)" >&2
-        local i=1
-        for opt in "$@"; do
-            printf '  %d) %s\n' "$i" "$opt" >&2
-            i=$((i + 1))
-        done
-        local raw
-        read -r -p "Selections: " raw
-        local IFS=','
-        for n in $raw; do
-            n="$(echo "$n" | tr -d '[:space:]')"
-            [ -z "$n" ] && continue
-            [[ "$n" =~ ^[0-9]+$ ]] || continue
-            [ "$n" -ge 1 ] && [ "$n" -le $# ] && printf '%s\n' "${!n}"
-        done
-    fi
+    printf '\n%s\n' "$label" >&2
+    printf '%s\n' "(comma-separated numbers, or empty for none)" >&2
+    local i=1
+    for opt in "$@"; do
+        printf '  %d) %s\n' "$i" "$opt" >&2
+        i=$((i + 1))
+    done
+    local raw
+    read -r -p "Selections: " raw
+    local IFS=','
+    for n in $raw; do
+        n="$(echo "$n" | tr -d '[:space:]')"
+        [ -z "$n" ] && continue
+        [[ "$n" =~ ^[0-9]+$ ]] || continue
+        [ "$n" -ge 1 ] && [ "$n" -le $# ] && printf '%s\n' "${!n}"
+    done
 }
 
-gum_spin() {
+run_with_label() {
+    # Usage: run_with_label "Doing thing..." -- cmd args...
     local title="$1"; shift
     [ "${1:-}" = "--" ] && shift
-    if have_gum; then
-        gum spin --spinner dot --title "$title" -- "$@"
-    else
-        printf '%s→%s %s ' "$C_BLUE" "$C_RESET" "$title" >&2
-        "$@"
-        local rc=$?
-        if [ $rc -eq 0 ]; then printf '%s✓%s\n' "$C_GREEN" "$C_RESET" >&2
-        else                   printf '%s✗%s\n' "$C_RED"   "$C_RESET" >&2; fi
-        return $rc
-    fi
+    printf '%s→%s %s\n' "$C_BLUE" "$C_RESET" "$title" >&2
+    "$@"
+    local rc=$?
+    if [ $rc -eq 0 ]; then printf '%s✓%s done\n'    "$C_GREEN" "$C_RESET" >&2
+    else                   printf '%s✗%s failed\n'  "$C_RED"   "$C_RESET" >&2; fi
+    return $rc
 }
 
-gum_header() {
+print_header() {
     local text="$1"
-    if have_gum; then
-        gum style --foreground 212 --bold --margin "1 0" "$text"
-    else
-        printf '\n%s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$text" "$C_RESET"
-        printf '%s\n' "$(printf '%*s' "${#text}" | tr ' ' '-')"
-    fi
+    printf '\n%s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$text" "$C_RESET"
+    printf '%s\n' "$(printf '%*s' "${#text}" | tr ' ' '-')"
 }
 
-gum_box() {
-    local text="$1"
-    if have_gum; then
-        gum style --border normal --padding "1 2" --margin "1 0" "$text"
-    else
-        printf '\n%s\n' "$text"
-    fi
+print_box() {
+    printf '\n%s\n' "$1"
 }
 
-log_info() { if have_gum; then gum style --foreground 4 "→ $*"; else printf '%s→ %s%s\n' "$C_BLUE"   "$*" "$C_RESET"; fi; }
-log_ok()   { if have_gum; then gum style --foreground 2 "✓ $*"; else printf '%s✓ %s%s\n' "$C_GREEN"  "$*" "$C_RESET"; fi; }
-log_warn() { if have_gum; then gum style --foreground 3 "! $*"; else printf '%s! %s%s\n' "$C_YELLOW" "$*" "$C_RESET"; fi; }
-log_err()  { if have_gum; then gum style --foreground 1 "✗ $*" >&2; else printf '%s✗ %s%s\n' "$C_RED" "$*" "$C_RESET" >&2; fi; }
+log_info() { printf '%s→ %s%s\n' "$C_BLUE"   "$*" "$C_RESET"; }
+log_ok()   { printf '%s✓ %s%s\n' "$C_GREEN"  "$*" "$C_RESET"; }
+log_warn() { printf '%s! %s%s\n' "$C_YELLOW" "$*" "$C_RESET"; }
+log_err()  { printf '%s✗ %s%s\n' "$C_RED"    "$*" "$C_RESET" >&2; }
 
 # =============================================================================
 # Argument parsing & help
@@ -190,7 +153,6 @@ Run this ONCE per project. For ongoing operations, use the task commands
 
 Usage:
   ./setup.sh             run setup (warns if .setup.config already exists)
-  ./setup.sh --no-gum    force plain-text prompts (no gum required)
   ./setup.sh --help      show this help
 EOF
 }
@@ -198,7 +160,6 @@ EOF
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --no-gum)  PLAIN_MODE=1 ;;
             --help|-h) print_help; exit "$EXIT_OK" ;;
             *)         printf 'Unknown flag: %s\n' "$1" >&2; print_help >&2; exit "$EXIT_BAD_ARGS" ;;
         esac
@@ -261,7 +222,7 @@ warn_if_already_setup() {
 }
 
 # =============================================================================
-# Homebrew + gum bootstrap (the only part that runs before gum exists)
+# Homebrew bootstrap
 # =============================================================================
 install_homebrew_if_missing() {
     if command -v brew >/dev/null 2>&1; then return 0; fi
@@ -281,26 +242,6 @@ install_homebrew_if_missing() {
     fi
 }
 
-ensure_gum() {
-    command -v gum >/dev/null 2>&1 && return 0
-    [ "$PLAIN_MODE" -eq 1 ] && return 0
-
-    printf '\nThis wizard uses %sgum%s for pretty prompts (selects, confirms, spinners).\n' "$C_BOLD" "$C_RESET"
-    printf 'Without it, the wizard still works but falls back to plain text prompts.\n'
-    local ans
-    read -r -p "Install gum via Homebrew now? [Y/n] " ans
-    case "$ans" in n|N) PLAIN_MODE=1; log_warn "Continuing in plain mode."; return 0 ;; esac
-
-    brew install gum
-
-    if command -v gum >/dev/null 2>&1; then
-        log_ok "gum installed."
-    else
-        PLAIN_MODE=1
-        log_warn "gum still not on PATH; falling back to plain mode."
-    fi
-}
-
 # =============================================================================
 # Step 1 — dependency installation
 # =============================================================================
@@ -314,9 +255,9 @@ ensure_tool() {
         return 0
     fi
 
-    if ! gum_confirm "$name is not installed. Install it via brew?"; then
+    if ! ask_confirm "$name is not installed. Install it via brew?"; then
         log_warn "Skipping $name."
-        if ! gum_confirm "Continue anyway? The wizard will likely fail later."; then
+        if ! ask_confirm "Continue anyway? The wizard will likely fail later."; then
             exit "$EXIT_TOOL_DECLINED"
         fi
         return 0
@@ -329,7 +270,7 @@ ensure_tool() {
         log_ok "$name installed"
     else
         log_err "$name install did not succeed."
-        if ! gum_confirm "Continue without $name?"; then exit "$EXIT_TOOL_DECLINED"; fi
+        if ! ask_confirm "Continue without $name?"; then exit "$EXIT_TOOL_DECLINED"; fi
     fi
 }
 
@@ -340,19 +281,19 @@ ensure_docker() {
     fi
 
     if ! command -v docker >/dev/null 2>&1; then
-        if gum_confirm "Docker not installed. Install Docker Desktop via brew?"; then
+        if ask_confirm "Docker not installed. Install Docker Desktop via brew?"; then
             brew install --cask docker
             log_info "Launch Docker Desktop from /Applications and finish first-run setup."
-            gum_confirm "Docker Desktop is running?" || true
+            ask_confirm "Docker Desktop is running?" || true
         fi
     elif ! docker info >/dev/null 2>&1; then
         log_warn "Docker is installed but the daemon isn't running."
-        gum_confirm "Start Docker Desktop, then continue?" || true
+        ask_confirm "Start Docker Desktop, then continue?" || true
     fi
 }
 
 step_dep_check() {
-    gum_header "Step 1 — Dependencies"
+    print_header "Step 1 — Dependencies"
     ensure_tool "op"   "--cask 1password-cli"
     ensure_tool "jq"   "jq"
     ensure_tool "task" "go-task"
@@ -366,7 +307,7 @@ step_dep_check() {
 # Step 2 — 1Password sign-in
 # =============================================================================
 step_op_signin() {
-    gum_header "Step 2 — Sign in to 1Password"
+    print_header "Step 2 — Sign in to 1Password"
 
     local attempt=1 max=3
     while [ $attempt -le $max ]; do
@@ -377,7 +318,7 @@ step_op_signin() {
             return 0
         fi
 
-        gum_box "Sign in to 1Password CLI
+        print_box "Sign in to 1Password CLI
 
 To enable Touch ID (recommended):
   1. Open the 1Password app
@@ -392,7 +333,7 @@ You'll need:
 
         attempt=$((attempt + 1))
         if [ $attempt -le $max ]; then
-            gum_confirm "Sign-in failed. Retry?" || break
+            ask_confirm "Sign-in failed. Retry?" || break
         fi
     done
 
@@ -403,15 +344,11 @@ You'll need:
 # =============================================================================
 # Step 3 — Project config prompts
 # =============================================================================
-default_vault_prefix() {
-    basename "$REPO_ROOT" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-20
-}
-
 prompt_vault_prefix() {
     local default val
-    default="${VAULT_PREFIX:-$(default_vault_prefix)}"
+    default="${VAULT_PREFIX:-API-APP}"
     while :; do
-        val="$(gum_input "Vault prefix (UPPERCASE, used as ${default}-LOCAL / -TEST / -PROD)" "$default")"
+        val="$(ask_input "Vault prefix (UPPERCASE, used as ${default}-LOCAL / -TEST / -PROD)" "$default")"
         if [[ ! "$val" =~ ^[A-Z0-9-]+$ ]]; then
             log_err "Prefix must contain only uppercase letters, digits, and dashes."
             continue
@@ -433,7 +370,7 @@ prompt_app_name() {
     local default val
     default="${APP_NAME:-$(printf '%s' "$VAULT_PREFIX" | tr '[:upper:]' '[:lower:]')}"
     while :; do
-        val="$(gum_input "App name (kebab-case, used as Docker container prefix)" "$default")"
+        val="$(ask_input "App name (kebab-case, used as Docker container prefix)" "$default")"
         if [[ ! "$val" =~ ^[a-z0-9-]+$ ]]; then
             log_err "App name must be lowercase letters, digits, and dashes."
             continue
@@ -447,7 +384,7 @@ prompt_external_port() {
     local val default
     default="${EXTERNAL_PORT:-8000}"
     while :; do
-        val="$(gum_input "External port (host port exposed for API)" "$default")"
+        val="$(ask_input "External port (host port exposed for API)" "$default")"
         if [[ ! "$val" =~ ^[0-9]+$ ]] || [ "$val" -lt 1024 ] || [ "$val" -gt 65535 ]; then
             log_err "Port must be a number between 1024 and 65535."
             continue
@@ -459,18 +396,18 @@ prompt_external_port() {
 
 prompt_optional_sections() {
     local selected
-    selected="$(gum_multichoose "Which optional sections do you want? (space to select, enter to confirm)" \
+    selected="$(ask_multichoose "Which optional sections do you want?" \
         "test" "sentry" "config")"
     OPTIONAL_SECTIONS="$(printf '%s' "$selected" | tr '\n' ',' | sed 's/,$//')"
 }
 
 step_collect_config() {
-    gum_header "Step 3 — Project configuration"
+    print_header "Step 3 — Project configuration"
     prompt_vault_prefix
     prompt_app_name
     prompt_external_port
 
-    gum_header "Step 4 — Optional sections"
+    print_header "Step 4 — Optional sections"
     log_info "Pick which optional secret groups you want to seed:"
     log_info "  • test   — TEST_DB_HOST/PORT/USER/PASSWORD/NAME"
     log_info "  • sentry — SENTRY_DSN, SENTRY_ENVIRONMENT"
@@ -536,13 +473,13 @@ create_or_reuse_vault() {
     if op vault get "$vault" >/dev/null 2>&1; then
         log_info "Vault $vault already exists."
         local action
-        action="$(gum_choose "What should I do with $vault?" "Use existing" "Recreate (deletes all items!)" "Skip this vault")"
+        action="$(ask_choose "What should I do with $vault?" "Use existing" "Recreate (deletes all items!)" "Skip this vault")"
         case "$action" in
             "Use existing")
                 CREATED_VAULTS+=("$vault")
                 ;;
             "Recreate"*)
-                if gum_confirm "Really delete $vault and all its items?"; then
+                if ask_confirm "Really delete $vault and all its items?"; then
                     op vault delete "$vault"
                     if ! op vault create "$vault" >/dev/null; then
                         log_err "Failed to recreate vault $vault."
@@ -557,7 +494,7 @@ create_or_reuse_vault() {
                 ;;
         esac
     else
-        if ! gum_confirm "Create vault $vault?"; then
+        if ! ask_confirm "Create vault $vault?"; then
             log_warn "Skipping $vault"
             return 1
         fi
@@ -575,7 +512,7 @@ seed_item() {
 
     if op item get "$key" --vault "$vault" >/dev/null 2>&1; then
         local action
-        action="$(gum_choose "$vault/$key exists. What now?" "Keep existing" "Overwrite" "Skip")"
+        action="$(ask_choose "$vault/$key exists. What now?" "Keep existing" "Overwrite" "Skip")"
         case "$action" in
             "Keep"*) return 0 ;;
             "Skip")  return 1 ;;
@@ -584,19 +521,19 @@ seed_item() {
     fi
 
     if is_auto_generated "$key"; then
-        if gum_confirm "Auto-generate a strong $key? (recommended)"; then
+        if ask_confirm "Auto-generate a strong $key? (recommended)"; then
             value="$(default_value_for "$key" "$env")"
             log_info "$key: generated (value hidden)"
         else
-            value="$(gum_password "Enter $key for $vault")"
+            value="$(ask_password "Enter $key for $vault")"
         fi
     else
         local default
         default="$(default_value_for "$key" "$env")"
         if [ -n "$default" ]; then
-            value="$(gum_input "$key for $vault" "$default")"
+            value="$(ask_input "$key for $vault" "$default")"
         else
-            value="$(gum_input "$key for $vault" "")"
+            value="$(ask_input "$key for $vault" "")"
         fi
         if [ -z "$value" ]; then
             log_warn "$key left empty; skipping."
@@ -646,7 +583,7 @@ seed_vault_items() {
 }
 
 step_create_and_seed_vaults() {
-    gum_header "Step 5 — Vaults"
+    print_header "Step 5 — Vaults"
     for env in local test prod; do
         if create_or_reuse_vault "$env"; then
             seed_vault_items "$env"
@@ -733,7 +670,7 @@ patch_taskfile() {
 }
 
 step_patch_tracked_files() {
-    gum_header "Step 6 — Wire up scripts"
+    print_header "Step 6 — Wire up scripts"
     patch_generate_env_sh
     patch_taskfile
 }
@@ -742,14 +679,14 @@ step_patch_tracked_files() {
 # Step 9 — Verify end-to-end
 # =============================================================================
 step_verify() {
-    gum_header "Step 7 — Verify"
+    print_header "Step 7 — Verify"
 
     if ! command -v task >/dev/null 2>&1; then
         log_warn "task not installed; skipping verification."
         return 0
     fi
 
-    if ! gum_spin "Running task env:generate ENV=local..." -- task env:generate ENV=local; then
+    if ! run_with_label "Running task env:generate ENV=local..." -- task env:generate ENV=local; then
         log_err "Verification failed: task env:generate ENV=local did not succeed."
         exit "$EXIT_VERIFY_FAILED"
     fi
@@ -770,7 +707,7 @@ step_verify() {
 # Step 9b — Detach from template (optional)
 # =============================================================================
 step_detach_git() {
-    gum_header "Step 8 — Detach from the template (optional)"
+    print_header "Step 8 — Detach from the template (optional)"
 
     if [ ! -d "${REPO_ROOT}/.git" ]; then
         log_info "No .git directory; nothing to detach."
@@ -789,7 +726,7 @@ step_detach_git() {
     fi
 
     local action
-    action="$(gum_choose "How would you like to handle git for this project?" \
+    action="$(ask_choose "How would you like to handle git for this project?" \
         "Fresh start (wipe .git, re-init as a new project)" \
         "Unlink remote only (keep history, remove origin)" \
         "Leave it alone")"
@@ -797,7 +734,7 @@ step_detach_git() {
     case "$action" in
         "Fresh start"*)
             log_warn "This deletes ALL git history (including the template's commits)."
-            if gum_confirm "Wipe .git and reinitialize? This cannot be undone."; then
+            if ask_confirm "Wipe .git and reinitialize? This cannot be undone."; then
                 rm -rf "${REPO_ROOT}/.git"
                 git -C "$REPO_ROOT" init -b main >/dev/null
                 log_ok "Fresh git repo initialized on branch 'main'."
@@ -859,11 +796,7 @@ Next steps:
 EOF
 )
 
-    if have_gum; then
-        gum style --border double --padding "1 2" --margin "1 0" "$body"
-    else
-        printf '\n%s\n\n' "$body"
-    fi
+    printf '\n%s\n\n' "$body"
 }
 
 # =============================================================================
@@ -884,9 +817,8 @@ main() {
     require_macos
     warn_if_already_setup
     install_homebrew_if_missing
-    ensure_gum
 
-    gum_header "FastAPI + 1Password setup wizard"
+    print_header "FastAPI + 1Password setup wizard"
 
     step_dep_check
     step_op_signin

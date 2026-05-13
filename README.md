@@ -36,12 +36,14 @@ API is at `http://localhost:8000` (or your configured `EXTERNAL_PORT`) and `/doc
 
 ### Re-running the wizard
 
+The wizard is one-and-done. After it succeeds, day-to-day use is `task dev` and `task env:generate` — see the Commands section below.
+
+If you re-run `./setup.sh` on a project that's already set up, it shows a big warning, lists the existing config, and requires you to type `yes` to proceed. Anything else exits without touching a thing.
+
 ```bash
-./setup.sh                  # resume / re-run with prompts
-./setup.sh --update-vaults  # seed new items without re-prompting config
-./setup.sh --reset          # start over (does not delete vaults)
-./setup.sh --dry-run        # see what it would do without doing it
-./setup.sh --help           # all flags
+./setup.sh             # run setup (warns if .setup.config already exists)
+./setup.sh --no-gum    # plain-text prompts (skip gum install)
+./setup.sh --help      # all flags
 ```
 
 ### What gets seeded into each vault
