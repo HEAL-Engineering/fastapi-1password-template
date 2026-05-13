@@ -349,7 +349,8 @@ prompt_vault_prefix() {
     default="${VAULT_PREFIX:-API-APP}"
     log_info "Used to name your 1Password vaults: <PREFIX>-LOCAL, <PREFIX>-TEST, <PREFIX>-PROD"
     while :; do
-        val="$(ask_input "Change the vault prefix" "$default")"
+        read -r -p "Change the vault prefix: " val
+        [ -z "$val" ] && val="$default"
         if [[ ! "$val" =~ ^[A-Z0-9-]+$ ]]; then
             log_err "Prefix must contain only uppercase letters, digits, and dashes."
             continue
