@@ -460,7 +460,6 @@ prompt_app_name() {
         fi
         APP_NAME="$val"
         VAULT_PREFIX="$(printf '%s' "$val" | tr '[:lower:]' '[:upper:]')"
-        log_ok "Vault prefix: $VAULT_PREFIX (auto-derived)"
         return
     done
 }
