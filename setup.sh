@@ -921,6 +921,7 @@ main() {
     install_homebrew_if_missing
 
     print_header "FastAPI + 1Password setup wizard"
+    printf '%sTip:%s when you see a value in [brackets], press Enter to accept it. Otherwise, type in your desired value.\n' "$C_DIM" "$C_RESET"
 
     step_dep_check
     step_op_signin
