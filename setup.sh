@@ -638,7 +638,6 @@ seed_vault_items() {
 
     local required=(JWT_SECRET_KEY DB_HOST DB_USER DB_PASSWORD DB_NAME)
     local optional_test=(TEST_DB_HOST TEST_DB_PORT TEST_DB_USER TEST_DB_PASSWORD TEST_DB_NAME)
-    local optional_sentry=(SENTRY_DSN SENTRY_ENVIRONMENT)
     local optional_config=(ENVIRONMENT LOG_LEVEL DB_PORT)
 
     log_info "Seeding items into $vault..."
@@ -651,9 +650,13 @@ seed_vault_items() {
         done
     fi
     if section_enabled "sentry"; then
-        for key in "${optional_sentry[@]}"; do
-            if seed_item "$vault" "$env" "$key"; then count=$((count + 1)); fi
-        done
+        log_info "SENTRY_DSN — leave blank to skip Sentry integration entirely."
+        if seed_item "$vault" "$env" "SENTRY_DSN"; then
+            count=$((count + 1))
+            if seed_item "$vault" "$env" "SENTRY_ENVIRONMENT"; then count=$((count + 1)); fi
+        else
+            log_info "Skipping SENTRY_ENVIRONMENT (no DSN was set)."
+        fi
     fi
     if section_enabled "config"; then
         for key in "${optional_config[@]}"; do
@@ -811,7 +814,6 @@ step_detach_git() {
     local action
     action="$(ask_choose "How would you like to handle git for this project?" \
         "Fresh start (wipe .git, re-init as a new project)" \
-        "Unlink remote only (keep history, remove origin)" \
         "Leave it alone")"
 
     case "$action" in
@@ -825,15 +827,6 @@ step_detach_git() {
                 log_info "Then: git remote add origin <your-new-repo-url>"
             else
                 log_info "Skipped — git history left intact."
-            fi
-            ;;
-        "Unlink remote"*)
-            if [ -n "$current_remote" ]; then
-                git -C "$REPO_ROOT" remote remove origin
-                log_ok "Removed 'origin' remote. History preserved."
-                log_info "Add your new remote with: git remote add origin <url>"
-            else
-                log_info "No 'origin' remote to remove."
             fi
             ;;
         *)
