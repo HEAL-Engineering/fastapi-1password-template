@@ -153,6 +153,10 @@ Interactive setup wizard for FastAPI + 1Password template (macOS-only)
 Run this ONCE per project. For ongoing operations, use the task commands
 (task env:generate, task dev, etc.).
 
+The wizard provisions only the LOCAL development environment
+(one 1Password vault: <PREFIX>-LOCAL). TEST and PROD vaults can be
+added later via a task command.
+
 Usage:
   ./setup.sh             run setup (warns if .setup.config already exists)
   ./setup.sh --help      show this help
@@ -680,12 +684,11 @@ seed_vault_items() {
 }
 
 step_create_and_seed_vaults() {
-    print_header "Step 5 — Vaults"
-    for env in local test prod; do
-        if create_or_reuse_vault "$env"; then
-            seed_vault_items "$env"
-        fi
-    done
+    print_header "Step 5 — Create LOCAL vault"
+    log_info "Setup creates only the LOCAL development vault. TEST/PROD can be added later."
+    if create_or_reuse_vault "local"; then
+        seed_vault_items "local"
+    fi
 }
 
 # =============================================================================
