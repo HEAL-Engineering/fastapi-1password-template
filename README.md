@@ -7,9 +7,11 @@ Production-ready FastAPI backend template with 1Password secrets management, Pos
 - macOS (Apple Silicon or Intel) — the setup wizard targets macOS
 - A 1Password account
 
-Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq, gum) is installed by the wizard if needed.
+Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq) is installed by the wizard if needed.
 
 ## Quick Start
+
+If you're starting a new project from this template, run the setup wizard:
 
 ```bash
 ./setup.sh
@@ -17,14 +19,15 @@ Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq, gum) is inst
 
 The wizard walks you through:
 
-1. Installing any missing tools (Homebrew, gum, 1Password CLI, jq, Task, Docker Desktop)
-2. Signing in to 1Password
-3. Picking a vault prefix, app name, and external port
-4. Auto-creating your three 1Password vaults (`{PREFIX}-LOCAL`, `-TEST`, `-PROD`)
-5. Seeding each vault with the required secrets (JWT key + DB password auto-generated)
-6. Wiring `scripts/generate-env.sh` and `Taskfile.yml` to your config
-7. Verifying end-to-end by generating `.env.local`
-8. Optionally detaching from the template's git history (fresh-start your project)
+1. Installing any missing tools (1Password CLI, jq, Task, Docker Desktop; Homebrew is bootstrapped first if missing)
+2. Signing in to 1Password and picking an account
+3. Picking an app name (used as both the Docker container prefix and the uppercased 1Password vault prefix) and external port
+4. Picking which optional secret groups to seed (`test`, `sentry`, `config`)
+5. Creating the `{PREFIX}-LOCAL` 1Password vault and seeding it with secrets (JWT key + DB password auto-generated)
+6. Verifying end-to-end by generating `.env.local`
+7. Optionally detaching from the template's git history (fresh-start your project)
+
+Only the `-LOCAL` vault is created by the wizard. `-TEST` and `-PROD` vaults can be added later as you need them.
 
 Once it finishes:
 
@@ -42,8 +45,22 @@ If you re-run `./setup.sh` on a project that's already set up, it shows a big wa
 
 ```bash
 ./setup.sh             # run setup (warns if .setup.config already exists)
-./setup.sh --no-gum    # plain-text prompts (skip gum install)
-./setup.sh --help      # all flags
+./setup.sh --help      # show usage
+```
+
+### Joining an existing project
+
+If a teammate already ran `./setup.sh` and you just cloned the repo, run the onboarding wizard instead:
+
+```bash
+./onboard.sh
+```
+
+It installs the same tools, signs you into 1Password, lets you pick the project's shared `-LOCAL` vault, writes `.setup.config`, and generates `.env.local` so `task start` works. You need to be invited to the project's 1Password vault first.
+
+```bash
+./onboard.sh           # run onboarding (warns if .setup.config already exists)
+./onboard.sh --help    # show usage
 ```
 
 ### What gets seeded into each vault
