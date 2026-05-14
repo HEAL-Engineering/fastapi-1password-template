@@ -2,6 +2,18 @@
 
 Production-ready FastAPI backend template with 1Password secrets management, PostgreSQL, and 4-layer architecture (API → Service → Provider → DAO).
 
+## What's wired up
+
+This isn't a "hello world" scaffold — the architectural plumbing is already done right so you can ship features on day one:
+
+- **Dependency injection through every layer.** Routes declare `service: GreetingService = Depends(GreetingService)`. Services declare `dao_factory: DAOFactory = Depends(DAOFactory)`. No globals, no service locators, no manual wiring — and every layer is trivially testable with FastAPI's `app.dependency_overrides`.
+- **Strict 4-layer separation that actually holds.** API → Service → Provider → DAO, enforced by convention and example code. Routes never touch the DB. Services never write SQL. Business logic lives in exactly one place.
+- **1Password as the source of truth for secrets.** One vault per environment (`{PREFIX}-LOCAL`, `-TEST`, `-PROD`); `task env:generate ENV=local` pulls secrets into `.env.local`. No `.env` files in git, no hand-copied credentials in Slack DMs, teammates onboard with `./onboard.sh` and are running locally in under a minute.
+- **Transaction patterns built into the DAO base class.** `create()` / `update()` / `delete()` auto-commit with auto-rollback on error; `add()` + `dao_factory.commit()` gives you atomic multi-record writes when you need them. You don't write boilerplate transaction handling.
+- **Async end-to-end.** Every DAO, service, and route uses `async/await` with SQLAlchemy `AsyncSession`. No blocking calls hiding in the request path, no sync-over-async footguns.
+
+See [CLAUDE.md](CLAUDE.md) for the full architecture reference and the example greeting endpoint for a complete route → service → DAO flow.
+
 ## Prerequisites
 
 - macOS (Apple Silicon or Intel) — the setup wizard targets macOS
