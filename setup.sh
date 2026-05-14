@@ -3,7 +3,7 @@
 # Interactive setup wizard for FastAPI + 1Password template (macOS-only)
 #
 # Run this ONCE per project. For ongoing operations, use the task commands
-# (task env:generate, task dev, etc.).
+# (task env:generate, task start, etc.).
 #
 #   ./setup.sh             run setup (warns if .setup.config already exists)
 #   ./setup.sh --help      show this help
@@ -15,8 +15,6 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${REPO_ROOT}/.setup.config"
-GENERATE_ENV_SCRIPT="${REPO_ROOT}/scripts/generate-env.sh"
-TASKFILE="${REPO_ROOT}/Taskfile.yml"
 WIZARD_VERSION=1
 
 VAULT_PREFIX=""
@@ -40,59 +38,18 @@ EXIT_VERIFY_FAILED=6
 EXIT_BAD_ARGS=64
 EXIT_INTERRUPT=130
 
-# ANSI fallbacks
-C_RESET=$'\033[0m'
-C_BOLD=$'\033[1m'
-C_DIM=$'\033[2m'
-C_RED=$'\033[31m'
-C_GREEN=$'\033[32m'
-C_YELLOW=$'\033[33m'
-C_BLUE=$'\033[34m'
-C_CYAN=$'\033[36m'
+# Shared helpers (colors, logging, prompts, brew/op/docker bootstrap).
+# shellcheck source=scripts/lib.sh
+source "${REPO_ROOT}/scripts/lib.sh"
 
 # =============================================================================
-# UI helpers — plain bash + ANSI colors (no TUI libraries)
+# UI helpers — setup-only prompts (rest live in scripts/lib.sh)
 # =============================================================================
-ask_confirm() {
-    local prompt="$1" ans
-    read -r -p "$prompt [y/N] " ans
-    case "$ans" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
-}
-
-ask_input() {
-    local label="$1" default_val="${2:-}" ans
-    if [ -n "$default_val" ]; then
-        read -r -p "$label [$default_val]: " ans
-        [ -z "$ans" ] && ans="$default_val"
-    else
-        read -r -p "$label: " ans
-    fi
-    printf '%s' "$ans"
-}
-
 ask_password() {
     local label="$1" ans
     read -r -s -p "$label: " ans
     printf '\n' >&2
     printf '%s' "$ans"
-}
-
-ask_choose() {
-    # Usage: ask_choose "Prompt" "opt1" "opt2" ...   → prints chosen option to stdout
-    local label="$1"; shift
-    printf '\n%s\n' "$label" >&2
-    local i=1
-    for opt in "$@"; do
-        printf '  %d) %s\n' "$i" "$opt" >&2
-        i=$((i + 1))
-    done
-    local choice
-    read -r -p "Choice [1]: " choice
-    [ -z "$choice" ] && choice=1
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt $# ]; then
-        choice=1
-    fi
-    printf '%s' "${!choice}"
 }
 
 ask_multichoose() {
@@ -116,33 +73,6 @@ ask_multichoose() {
     done
 }
 
-run_with_label() {
-    # Usage: run_with_label "Doing thing..." -- cmd args...
-    local title="$1"; shift
-    [ "${1:-}" = "--" ] && shift
-    printf '%s→%s %s\n' "$C_BLUE" "$C_RESET" "$title" >&2
-    "$@"
-    local rc=$?
-    if [ $rc -eq 0 ]; then printf '%s✓%s done\n'    "$C_GREEN" "$C_RESET" >&2
-    else                   printf '%s✗%s failed\n'  "$C_RED"   "$C_RESET" >&2; fi
-    return $rc
-}
-
-print_header() {
-    local text="$1"
-    printf '\n%s%s%s%s\n' "$C_BOLD" "$C_CYAN" "$text" "$C_RESET"
-    printf '%s\n' "$(printf '%*s' "${#text}" | tr ' ' '-')"
-}
-
-print_box() {
-    printf '\n%s\n' "$1"
-}
-
-log_info() { printf '%s→ %s%s\n' "$C_BLUE"   "$*" "$C_RESET"; }
-log_ok()   { printf '%s✓ %s%s\n' "$C_GREEN"  "$*" "$C_RESET"; }
-log_warn() { printf '%s! %s%s\n' "$C_YELLOW" "$*" "$C_RESET"; }
-log_err()  { printf '%s✗ %s%s\n' "$C_RED"    "$*" "$C_RESET" >&2; }
-
 # =============================================================================
 # Argument parsing & help
 # =============================================================================
@@ -151,7 +81,7 @@ print_help() {
 Interactive setup wizard for FastAPI + 1Password template (macOS-only)
 
 Run this ONCE per project. For ongoing operations, use the task commands
-(task env:generate, task dev, etc.).
+(task env:generate, task start, etc.).
 
 The wizard provisions only the LOCAL development environment
 (one 1Password vault: <PREFIX>-LOCAL). TEST and PROD vaults can be
@@ -171,17 +101,6 @@ parse_args() {
         esac
         shift
     done
-}
-
-# =============================================================================
-# Sanity check — this template targets macOS only
-# =============================================================================
-require_macos() {
-    if [ "$(uname -s)" != "Darwin" ]; then
-        log_err "This wizard is macOS-only. Detected: $(uname -s)"
-        log_err "If you're on Linux/WSL, the manual flow in README still works."
-        exit "$EXIT_UNSUPPORTED_OS"
-    fi
 }
 
 # =============================================================================
@@ -208,11 +127,10 @@ warn_if_already_setup() {
     printf '    • OVERWRITE .setup.config\n'
     printf '    • Walk you through creating/recreating 1Password vaults\n'
     printf '    • Prompt to overwrite vault items (you can still pick "Keep")\n'
-    printf '    • Re-patch Taskfile.yml and scripts/generate-env.sh\n'
     printf '\n'
     printf '  %sFor ongoing operations, use the task commands instead:%s\n' "$C_BOLD" "$C_RESET"
     printf '    • task env:generate       # regenerate .env files from 1Password\n'
-    printf '    • task dev                # start development environment\n'
+    printf '    • task start              # start development environment\n'
     printf '    • task --list             # see all commands\n'
     printf '\n'
 
@@ -228,76 +146,8 @@ warn_if_already_setup() {
 }
 
 # =============================================================================
-# Homebrew bootstrap
-# =============================================================================
-install_homebrew_if_missing() {
-    if command -v brew >/dev/null 2>&1; then return 0; fi
-
-    printf 'Homebrew is required but not installed.\n'
-    local ans
-    read -r -p "Install Homebrew now? [Y/n] " ans
-    case "$ans" in n|N) log_err "Cannot continue without Homebrew."; exit "$EXIT_TOOL_DECLINED" ;; esac
-
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    # Add brew to PATH for this session (Apple Silicon default location).
-    if [ -x /opt/homebrew/bin/brew ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    elif [ -x /usr/local/bin/brew ]; then
-        eval "$(/usr/local/bin/brew shellenv)"
-    fi
-}
-
-# =============================================================================
 # Step 1 — dependency installation
 # =============================================================================
-ensure_tool() {
-    # Usage: ensure_tool <name> <brew-args> [optional_install_check_cmd]
-    local name="$1" brew_args="$2"
-    local check_cmd="${3:-command -v $name >/dev/null 2>&1}"
-
-    if eval "$check_cmd"; then
-        log_ok "$name installed"
-        return 0
-    fi
-
-    if ! ask_confirm "$name is not installed. Install it via brew?"; then
-        log_warn "Skipping $name."
-        if ! ask_confirm "Continue anyway? The wizard will likely fail later."; then
-            exit "$EXIT_TOOL_DECLINED"
-        fi
-        return 0
-    fi
-
-    # shellcheck disable=SC2086  # intentional word-splitting on brew_args
-    brew install $brew_args
-
-    if eval "$check_cmd"; then
-        log_ok "$name installed"
-    else
-        log_err "$name install did not succeed."
-        if ! ask_confirm "Continue without $name?"; then exit "$EXIT_TOOL_DECLINED"; fi
-    fi
-}
-
-ensure_docker() {
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        log_ok "docker installed and daemon running"
-        return 0
-    fi
-
-    if ! command -v docker >/dev/null 2>&1; then
-        if ask_confirm "Docker not installed. Install Docker Desktop via brew?"; then
-            brew install --cask docker
-            log_info "Launch Docker Desktop from /Applications and finish first-run setup."
-            ask_confirm "Docker Desktop is running?" || true
-        fi
-    elif ! docker info >/dev/null 2>&1; then
-        log_warn "Docker is installed but the daemon isn't running."
-        ask_confirm "Start Docker Desktop, then continue?" || true
-    fi
-}
-
 step_dep_check() {
     print_header "Step 1 — Dependencies"
     ensure_tool "op"   "--cask 1password-cli"
@@ -312,128 +162,6 @@ step_dep_check() {
 # =============================================================================
 # Step 2 — 1Password sign-in + account selection
 # =============================================================================
-ensure_op_signed_in() {
-    local attempt=1 max=3
-    while [ $attempt -le $max ]; do
-        if op account list >/dev/null 2>&1; then return 0; fi
-
-        print_box "Sign in to 1Password CLI
-
-To enable Touch ID (recommended):
-  1. Open the 1Password app
-  2. Settings → Developer → Integrate with 1Password CLI
-
-You'll need:
-  • Your 1Password account email
-  • Your Secret Key (from Emergency Kit)
-  • Your Master Password"
-
-        if op signin; then continue; fi
-
-        attempt=$((attempt + 1))
-        if [ $attempt -le $max ]; then
-            ask_confirm "Sign-in failed. Retry?" || break
-        fi
-    done
-
-    log_err "Could not sign in to 1Password after $max attempts."
-    exit "$EXIT_OP_SIGNIN"
-}
-
-# Builds a vault-list peek for each account so accounts with identical email/URL
-# can still be told apart by the vaults visible inside them.
-prompt_op_account() {
-    local accounts_json count
-    accounts_json="$(op account list --format json 2>/dev/null || echo '[]')"
-    count="$(printf '%s' "$accounts_json" | jq 'length')"
-
-    if [ "$count" -eq 0 ]; then
-        log_err "No 1Password accounts are added to op. Run 'op account add' first."
-        exit "$EXIT_OP_SIGNIN"
-    fi
-
-    if [ "$count" -eq 1 ]; then
-        local email url uuid
-        email="$(printf '%s' "$accounts_json" | jq -r '.[0].email')"
-        url="$(  printf '%s' "$accounts_json" | jq -r '.[0].url')"
-        uuid="$( printf '%s' "$accounts_json" | jq -r '.[0].user_uuid')"
-        log_info "Found one 1Password account: $email @ $url"
-        if ! ask_confirm "Use this account?"; then
-            log_err "Aborted. Add or switch accounts via 'op account add', then re-run."
-            exit "$EXIT_OP_SIGNIN"
-        fi
-        OP_ACCOUNT="$uuid"
-        OP_ACCOUNT_LABEL="$email @ $url"
-        export OP_ACCOUNT
-        log_ok "Using $OP_ACCOUNT_LABEL"
-        return 0
-    fi
-
-    printf '\n%sMultiple 1Password accounts detected.%s\n' "$C_BOLD" "$C_RESET" >&2
-
-    # Pre-flight: any account whose session is locked can't list vaults. Offer
-    # to unlock so the picker can disambiguate accounts that share email+URL.
-    local i uuid email url short_uuid locked_any=0
-    for i in $(seq 0 $((count - 1))); do
-        uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
-        if op vault list --account "$uuid" >/dev/null 2>&1; then continue; fi
-
-        email="$(    printf '%s' "$accounts_json" | jq -r ".[$i].email")"
-        url="$(      printf '%s' "$accounts_json" | jq -r ".[$i].url")"
-        short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
-        locked_any=1
-
-        log_warn "Account [$short_uuid] $email @ $url is locked."
-        if ask_confirm "Unlock it now (Touch ID / master password) to show its vaults?"; then
-            if ! op signin --account "$uuid" >/dev/null 2>&1; then
-                log_warn "Unlock failed — this account will show without vault info."
-            fi
-        fi
-    done
-    [ "$locked_any" -eq 1 ] && printf '\n' >&2
-
-    printf 'Showing vaults in each account so you can tell them apart:\n' >&2
-
-    local uuids=() labels=() vaults
-    for i in $(seq 0 $((count - 1))); do
-        email="$(printf '%s' "$accounts_json" | jq -r ".[$i].email")"
-        url="$(  printf '%s' "$accounts_json" | jq -r ".[$i].url")"
-        uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
-        short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
-
-        vaults="$(op vault list --account "$uuid" --format json 2>/dev/null \
-            | jq -r 'map(.name) | join(", ")' 2>/dev/null || true)"
-        if [ -z "$vaults" ]; then
-            vaults="(locked — vaults hidden)"
-        elif [ "${#vaults}" -gt 90 ]; then
-            vaults="$(printf '%s' "$vaults" | cut -c1-87)..."
-        fi
-
-        uuids+=("$uuid")
-        labels+=("$email @ $url  [${short_uuid}]")
-
-        printf '\n  %d) %s @ %s  %s[%s]%s\n' "$((i + 1))" "$email" "$url" "$C_DIM" "$short_uuid" "$C_RESET" >&2
-        printf '       %svaults:%s %s\n' "$C_DIM" "$C_RESET" "$vaults" >&2
-    done
-
-    printf '\n' >&2
-    local choice
-    while :; do
-        read -r -p "Pick an account [1]: " choice
-        [ -z "$choice" ] && choice=1
-        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
-            break
-        fi
-        log_err "Enter a number 1-$count."
-    done
-
-    local idx=$((choice - 1))
-    OP_ACCOUNT="${uuids[$idx]}"
-    OP_ACCOUNT_LABEL="${labels[$idx]}"
-    export OP_ACCOUNT
-    log_ok "Using account: $OP_ACCOUNT_LABEL"
-}
-
 step_op_signin() {
     print_header "Step 2 — Sign in to 1Password"
     ensure_op_signed_in
@@ -699,73 +427,10 @@ write_config() {
 }
 
 # =============================================================================
-# Step 8 — Patch tracked files
-# =============================================================================
-patch_generate_env_sh() {
-    if [ ! -f "$GENERATE_ENV_SCRIPT" ]; then
-        log_warn "$GENERATE_ENV_SCRIPT missing; skipping patch."
-        return 0
-    fi
-    if grep -q "SETUP_WIZARD_MANAGED" "$GENERATE_ENV_SCRIPT"; then
-        log_ok "scripts/generate-env.sh already wizard-managed"
-        return 0
-    fi
-    if ! grep -q '^VAULT_PREFIX="YOUR-PROJECT"$' "$GENERATE_ENV_SCRIPT"; then
-        log_warn "scripts/generate-env.sh has been hand-edited; leaving it alone."
-        return 0
-    fi
-
-    local tmp="${GENERATE_ENV_SCRIPT}.tmp"
-    awk '
-        /^VAULT_PREFIX="YOUR-PROJECT"$/ {
-            print "# SETUP_WIZARD_MANAGED — VAULT_PREFIX sourced from .setup.config"
-            print "_SETUP_CONFIG=\"$(cd \"$(dirname \"$0\")/..\" && pwd)/.setup.config\""
-            print "if [ -f \"$_SETUP_CONFIG\" ]; then"
-            print "  set -a; . \"$_SETUP_CONFIG\"; set +a"
-            print "fi"
-            print ": \"${VAULT_PREFIX:?VAULT_PREFIX not set — run ./setup.sh first}\""
-            next
-        }
-        { print }
-    ' "$GENERATE_ENV_SCRIPT" > "$tmp"
-
-    mv "$tmp" "$GENERATE_ENV_SCRIPT"
-    chmod +x "$GENERATE_ENV_SCRIPT"
-    log_ok "Patched scripts/generate-env.sh"
-}
-
-patch_taskfile() {
-    if [ ! -f "$TASKFILE" ]; then
-        log_warn "$TASKFILE missing; skipping patch."
-        return 0
-    fi
-    local tmp="${TASKFILE}.tmp"
-    awk -v app_name="$APP_NAME" -v ext_port="$EXTERNAL_PORT" '
-        /^  APP_NAME: fastapi-template$/ { print "  APP_NAME: " app_name; next }
-        /^  EXTERNAL_PORT: "8000"$/      { print "  EXTERNAL_PORT: \"" ext_port "\""; next }
-        { print }
-    ' "$TASKFILE" > "$tmp"
-
-    if cmp -s "$TASKFILE" "$tmp"; then
-        log_ok "Taskfile.yml already up to date"
-        rm -f "$tmp"
-    else
-        mv "$tmp" "$TASKFILE"
-        log_ok "Patched Taskfile.yml (APP_NAME, EXTERNAL_PORT)"
-    fi
-}
-
-step_patch_tracked_files() {
-    print_header "Step 6 — Wire up scripts"
-    patch_generate_env_sh
-    patch_taskfile
-}
-
-# =============================================================================
-# Step 9 — Verify end-to-end
+# Step 6 — Verify end-to-end
 # =============================================================================
 step_verify() {
-    print_header "Step 7 — Verify"
+    print_header "Step 6 — Verify"
 
     if ! command -v task >/dev/null 2>&1; then
         log_warn "task not installed; skipping verification."
@@ -790,10 +455,10 @@ step_verify() {
 }
 
 # =============================================================================
-# Step 9b — Detach from template (optional)
+# Step 7 — Detach from template (optional)
 # =============================================================================
 step_detach_git() {
-    print_header "Step 8 — Detach from the template (optional)"
+    print_header "Step 7 — Detach from the template (optional)"
 
     if [ ! -d "${REPO_ROOT}/.git" ]; then
         log_info "No .git directory; nothing to detach."
@@ -868,7 +533,7 @@ Items seeded:
 ${count_lines:-  (none)}
 
 Next steps:
-  • task dev                       # start the development environment
+  • task start                     # start the development environment
   • open http://localhost:$EXTERNAL_PORT/docs
 EOF
 )
@@ -903,7 +568,6 @@ main() {
     step_collect_config
     write_config 0
     step_create_and_seed_vaults
-    step_patch_tracked_files
     write_config 1
     step_verify
     step_detach_git

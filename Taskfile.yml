@@ -1,16 +1,15 @@
 version: '3'
 
 # =============================================================================
-# CONFIGURATION - Modify these values for your project
+# Project values are read from .setup.config (written by ./setup.sh).
+# To change APP_NAME or EXTERNAL_PORT, edit .setup.config and re-run any task.
 # =============================================================================
-# Main Taskfile - orchestrates all development tasks
-# Secrets stored in 1Password vaults: YOUR-PROJECT-LOCAL, YOUR-PROJECT-TEST, YOUR-PROJECT-PROD
 
 vars:
-  # Project name - used for Docker container names and compose project
-  APP_NAME: fastapi-template
-  # External port exposed on host machine (internal is always 8000)
-  EXTERNAL_PORT: "8000"
+  APP_NAME:
+    sh: . ./.setup.config && echo "$APP_NAME"
+  EXTERNAL_PORT:
+    sh: . ./.setup.config && echo "$EXTERNAL_PORT"
 
 env:
   # Allow Task-run commands to bypass docker guardrails
@@ -30,52 +29,41 @@ includes:
     dir: .
 
 tasks:
-  # === Main Entry Points ===
-
   default:
-    desc: "Show help"
+    desc: "List all available tasks"
     aliases: [help]
     silent: true
     cmds:
       - task --list
 
-  dev:
-    desc: "🚀 Start development (smart: auto-updates, skips what's done)"
+  start:
+    desc: "Start the dev environment (generates .env if missing, builds & restarts containers)"
     cmds:
       - task: helpers:dev_smart
 
-  clean:
-    desc: "🧹 Clean up development environment (stops servers, removes artifacts)"
-    cmds:
-      - task: helpers:clean_environment
-
-  clean:all:
-    desc: "🗑️  Remove project containers, volumes, images, and all artifacts"
-    cmds:
-      - task: helpers:clean_environment
-        vars:
-          ALL: "true"
-
-  # === Backward Compatibility Aliases ===
-
-  env:
-    desc: "Generate .env files (smart: auto-setup and auto-create if needed)"
-    cmds:
-      - task: env:generate
-        vars:
-          ENV: '{{.ENV | default ""}}'
-
-  stop:
-    desc: "🛑 Stop development environment"
+  down:
+    desc: "Stop the dev environment (docker compose down)"
     cmds:
       - docker compose down
 
   logs:
-    desc: "📋 View backend logs"
+    desc: "Tail backend container logs"
     cmds:
       - docker compose logs -f backend
 
   test:
-    desc: "🧪 Run tests"
+    desc: "Run the backend test suite inside the container"
     cmds:
       - docker compose exec backend uv run pytest -v
+
+  clean:
+    desc: "Stop containers and prune dangling images (keeps volumes & built images)"
+    cmds:
+      - task: helpers:clean_environment
+
+  clean:all:
+    desc: "Wipe everything: containers, volumes, project images, venv, caches"
+    cmds:
+      - task: helpers:clean_environment
+        vars:
+          ALL: "true"

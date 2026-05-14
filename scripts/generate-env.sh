@@ -2,9 +2,8 @@
 set -euo pipefail
 
 # =============================================================================
-# CONFIGURATION — VAULT_PREFIX is sourced from .setup.config (written by ./setup.sh)
+# VAULT_PREFIX is sourced from .setup.config (written by ./setup.sh).
 # =============================================================================
-# SETUP_WIZARD_MANAGED — do not hardcode VAULT_PREFIX here; run ./setup.sh.
 _SETUP_CONFIG="$(cd "$(dirname "$0")/.." && pwd)/.setup.config"
 if [ -f "$_SETUP_CONFIG" ]; then
     set -a; . "$_SETUP_CONFIG"; set +a

@@ -189,11 +189,11 @@ tasks:
           {{if eq .ALL "true"}}
           echo ""
           echo "🗑️  Clean all complete!"
-          echo "   Start fresh with 'task dev'"
+          echo "   Start fresh with 'task start'"
           {{else}}
           echo ""
           echo "Next steps:"
-          echo "  • Run 'task dev' to restart"
+          echo "  • Run 'task start' to restart"
           {{end}}
         else
           echo ""

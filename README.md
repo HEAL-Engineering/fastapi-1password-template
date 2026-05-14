@@ -7,7 +7,7 @@ Production-ready FastAPI backend template with 1Password secrets management, Pos
 - macOS (Apple Silicon or Intel) — the setup wizard targets macOS
 - A 1Password account
 
-Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq, gum) is installed by the wizard.
+Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq, gum) is installed by the wizard if needed.
 
 ## Quick Start
 
@@ -29,14 +29,14 @@ The wizard walks you through:
 Once it finishes:
 
 ```bash
-task dev
+task start
 ```
 
 API is at `http://localhost:8000` (or your configured `EXTERNAL_PORT`) and `/docs` for the OpenAPI UI.
 
 ### Re-running the wizard
 
-The wizard is one-and-done. After it succeeds, day-to-day use is `task dev` and `task env:generate` — see the Commands section below.
+The wizard is one-and-done. After it succeeds, day-to-day use is `task start` and `task env:generate` — see the Commands section below.
 
 If you re-run `./setup.sh` on a project that's already set up, it shows a big warning, lists the existing config, and requires you to type `yes` to proceed. Anything else exits without touching a thing.
 
@@ -61,7 +61,8 @@ The wizard auto-generates strong values for `JWT_SECRET_KEY` and any `DB_PASSWOR
 
 | Command | Description |
 |---------|-------------|
-| `task dev` | Start development environment |
+| `task start` | Start development environment |
+| `task down` | Stop the dev environment |
 | `task clean` | Stop containers, optionally remove artifacts |
 | `task clean:all` | Remove all project Docker resources |
 | `task logs` | View backend logs |
