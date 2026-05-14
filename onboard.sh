@@ -187,7 +187,9 @@ step_collect_config() {
 
     local default_app
     default_app="$(printf '%s' "$VAULT_PREFIX" | tr '[:upper:]' '[:lower:]')"
+    printf '\n'
     APP_NAME="$(ask_input "App name (Docker container prefix)" "$default_app")"
+    printf '\n'
     EXTERNAL_PORT="$(ask_input "External port for the API" "8000")"
 }
 

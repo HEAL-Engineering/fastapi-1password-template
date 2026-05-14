@@ -370,17 +370,21 @@ seed_vault_items() {
 
     log_info "Seeding items into $vault..."
     for key in "${required[@]}"; do
+        printf '\n'
         if seed_item "$vault" "$env" "$key"; then count=$((count + 1)); fi
     done
     if section_enabled "test"; then
         for key in "${optional_test[@]}"; do
+            printf '\n'
             if seed_item "$vault" "$env" "$key"; then count=$((count + 1)); fi
         done
     fi
     if section_enabled "sentry"; then
+        printf '\n'
         log_info "SENTRY_DSN — leave blank to skip Sentry integration entirely."
         if seed_item "$vault" "$env" "SENTRY_DSN"; then
             count=$((count + 1))
+            printf '\n'
             if seed_item "$vault" "$env" "SENTRY_ENVIRONMENT"; then count=$((count + 1)); fi
         else
             log_info "Skipping SENTRY_ENVIRONMENT (no DSN was set)."
@@ -388,11 +392,13 @@ seed_vault_items() {
     fi
     if section_enabled "config"; then
         for key in "${optional_config[@]}"; do
+            printf '\n'
             if seed_item "$vault" "$env" "$key"; then count=$((count + 1)); fi
         done
     fi
 
     VAULT_ITEM_SUMMARY+=("${vault}:${count}")
+    printf '\n'
     log_ok "$vault: $count items processed"
 }
 
