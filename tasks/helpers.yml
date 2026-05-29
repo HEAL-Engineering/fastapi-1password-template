@@ -1,0 +1,210 @@
+version: '3'
+
+# Internal Helper Tasks
+# Contains dev, clean, and docker check logic
+
+tasks:
+  # === Internal Docker Helper ===
+
+  check_docker:
+    silent: true
+    cmds:
+      - |
+        if ! docker info >/dev/null 2>&1; then
+          echo "❌ Docker daemon is not running"
+          echo ""
+          echo "Please start Docker:"
+          echo "  • Open Docker Desktop application"
+          echo "  • Wait for Docker to start (you'll see the whale icon in the menu bar)"
+          echo ""
+          printf "Press Enter once Docker is running, or Ctrl+C to cancel: "
+          read -r
+          echo ""
+
+          if ! docker info >/dev/null 2>&1; then
+            echo "❌ Docker is still not running. Please start Docker and try again."
+            exit 1
+          fi
+
+          echo "✅ Docker is now running"
+          echo ""
+        fi
+
+  # === Smart Dev Task ===
+
+  dev_smart:
+    silent: true
+    cmds:
+      - |
+        echo "🚀 Starting development environment..."
+        echo ""
+
+        # Check Docker daemon
+        task helpers:check_docker
+
+        # Check if .env.local exists, generate if missing
+        if [ ! -f .env.local ]; then
+          echo "📥 Generating .env files from 1Password..."
+          if op account list >/dev/null 2>&1; then
+            task env:generate ENV=local
+          else
+            echo "❌ Not signed in to 1Password"
+            echo "   Run: task env:setup"
+            exit 1
+          fi
+        else
+          echo "✅ .env.local exists"
+        fi
+        echo ""
+
+        # Check if containers are already running
+        echo "🐳 Checking Docker containers..."
+        if docker compose ps | grep -q "backend.*Up"; then
+          echo "   ✅ Containers already running"
+          echo ""
+          echo "🔄 Restarting to pick up any .env changes..."
+          docker compose restart backend
+        else
+          echo "   🚀 Starting Docker containers..."
+          docker compose up -d --build --remove-orphans
+        fi
+        echo ""
+
+        # Bootstrap database schema (idempotent — create_all skips existing tables).
+        # Required because the FastAPI app does not call init_db() on startup.
+        echo "📊 Bootstrapping database schema..."
+        until docker compose exec -T backend uv run python init_db.py 2>&1; do
+          echo "   ⏳ Backend not ready yet, retrying in 2s..."
+          sleep 2
+        done
+        echo ""
+
+        echo "✅ Development environment ready!"
+        echo ""
+        echo "Your API is running at: http://localhost:${EXTERNAL_PORT:-8000}"
+        echo "  • Docs: http://localhost:${EXTERNAL_PORT:-8000}/docs"
+        echo "  • Health: http://localhost:${EXTERNAL_PORT:-8000}/health"
+        echo ""
+        echo "Useful commands:"
+        echo "  • View logs:    docker compose logs -f backend"
+        echo "  • Stop:         docker compose down"
+        echo "  • Clean:        task clean"
+
+  # === Clean Environment ===
+
+  clean_environment:
+    silent: true
+    vars:
+      ALL: '{{.ALL | default "false"}}'
+    cmds:
+      - |
+        {{if eq .ALL "true"}}
+        echo "🗑️  CLEAN ALL - Removing all project Docker resources..."
+        {{else}}
+        echo "🧹 Cleaning up development environment..."
+        {{end}}
+        echo ""
+
+        # Check if Docker daemon is running (for clean:all mode)
+        {{if eq .ALL "true"}}
+        if ! docker ps >/dev/null 2>&1; then
+          echo "❌ Docker daemon is not running"
+          echo ""
+          echo "Please start Docker Desktop"
+          echo ""
+          printf "Press Enter once Docker is running, or Ctrl+C to cancel: "
+          read -r
+          echo ""
+
+          if ! docker ps >/dev/null 2>&1; then
+            echo "❌ Docker is still not running. Please start Docker and try again."
+            exit 1
+          fi
+
+          echo "✅ Docker is now running"
+          echo ""
+        fi
+        {{end}}
+
+        # Stop Docker containers
+        {{if eq .ALL "true"}}
+        echo "🐳 Stopping and removing Docker containers with volumes..."
+        docker compose down -v 2>/dev/null || echo "   ℹ️  No Docker containers running"
+        echo "   ✅ Containers and volumes removed"
+        echo ""
+
+        # Remove project Docker images (project-scoped only, not system-wide)
+        echo "🗑️  Removing project Docker images..."
+        PROJECT_IMAGES=$(docker compose images --format '{{.ID}}' 2>/dev/null | sort -u)
+        if [ -n "$PROJECT_IMAGES" ]; then
+          echo "$PROJECT_IMAGES" | while read -r image_id; do
+            if [ -n "$image_id" ]; then
+              docker rmi -f "$image_id" 2>/dev/null || true
+            fi
+          done
+          echo "   ✅ Removed project images"
+        else
+          echo "   ℹ️  No project images to remove"
+        fi
+        {{else}}
+        echo "🐳 Stopping Docker containers..."
+        docker compose down 2>/dev/null || echo "   ℹ️  No Docker containers running"
+        {{end}}
+
+        {{if eq .ALL "false"}}
+        # Clean up dangling Docker images (only in normal clean)
+        echo ""
+        echo "🗑️  Cleaning up dangling Docker images..."
+        DANGLING_COUNT=$(docker images -f "dangling=true" -q | wc -l | tr -d ' ')
+        if [ "$DANGLING_COUNT" -gt 0 ]; then
+          docker image prune -f > /dev/null 2>&1
+          echo "   ✅ Removed $DANGLING_COUNT dangling image(s)"
+        else
+          echo "   ℹ️  No dangling images to clean"
+        fi
+        {{end}}
+
+        # Remove artifacts
+        {{if eq .ALL "true"}}
+        echo ""
+        echo "🗑️  Removing all development artifacts..."
+        CONFIRM="y"
+        {{else}}
+        echo ""
+        echo "🗑️  Remove development artifacts? (y/N)"
+        read -r CONFIRM
+        {{end}}
+
+        if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+          echo ""
+          echo "Removing:"
+          echo "  • backend/.venv"
+          echo "  • backend/.env"
+          echo "  • backend/data/"
+          echo "  • Python cache (__pycache__, .pytest_cache, *.pyc)"
+
+          rm -rf backend/.venv
+          rm -f backend/.env
+          rm -rf backend/data
+
+          # Clean Python cache files
+          find backend -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          find backend -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+          find backend -type f -name "*.pyc" -delete 2>/dev/null || true
+          find backend -type f -name "*.pyo" -delete 2>/dev/null || true
+
+          echo ""
+          echo "✅ Cleaned up all development artifacts"
+          {{if eq .ALL "true"}}
+          echo ""
+          echo "🗑️  Clean all complete!"
+          echo "   Start fresh with 'task start'"
+          {{else}}
+          echo ""
+          echo "Next steps:"
+          echo "  • Run 'task start' to restart"
+          {{end}}
+        else
+          echo ""
+          echo "ℹ️  Kept development artifacts"
+        fi

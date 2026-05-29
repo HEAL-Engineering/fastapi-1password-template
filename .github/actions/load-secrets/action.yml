@@ -1,0 +1,148 @@
+name: 'Load Secrets from 1Password'
+description: 'Dynamically discovers and loads every secret in a 1Password vault using concurrent fetches with retry, then writes them to .env.{environment}.'
+
+inputs:
+  environment:
+    description: 'Environment to load secrets for (e.g. local, test, prod). Determines the .env file name.'
+    required: true
+  vault:
+    description: '1Password vault name. The single source of truth for env var names (e.g., MY-APP-LOCAL, MY-APP-TEST, MY-APP-PROD).'
+    required: true
+  service-account-token:
+    description: '1Password service account token used by the CLI.'
+    required: true
+  concurrency:
+    description: 'Number of concurrent 1Password CLI requests. Higher = faster, but may hit rate limits.'
+    required: false
+    default: '10'
+  max-retries:
+    description: 'Maximum number of retry attempts per secret on transient failure.'
+    required: false
+    default: '3'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install 1Password CLI
+      uses: 1password/install-cli-action@v3
+
+    - name: Load secrets from 1Password
+      shell: bash
+      env:
+        OP_SERVICE_ACCOUNT_TOKEN: ${{ inputs.service-account-token }}
+        VAULT: ${{ inputs.vault }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        CONCURRENCY: ${{ inputs.concurrency }}
+        MAX_RETRIES: ${{ inputs.max-retries }}
+      run: |
+        set -eo pipefail
+
+        ENV_FILE=".env.${ENVIRONMENT}"
+        TMP_DIR="$(mktemp -d)"
+        trap 'rm -rf "$TMP_DIR"' EXIT
+
+        SECRETS_DIR="$TMP_DIR/secrets"
+        FAILURES_FILE="$TMP_DIR/failures"
+        RETRIES_FILE="$TMP_DIR/retries"
+        mkdir -p "$SECRETS_DIR"
+        : > "$FAILURES_FILE"
+        : > "$RETRIES_FILE"
+
+        echo "📦 Listing items in vault: ${VAULT}"
+        ITEM_LIST="$TMP_DIR/items.txt"
+        op item list --vault="${VAULT}" --format=json | jq -r '.[].title' > "$ITEM_LIST"
+
+        EXPECTED=$(grep -c . "$ITEM_LIST" || true)
+        if [ "${EXPECTED:-0}" -eq 0 ]; then
+          echo "❌ No items found in vault ${VAULT}"
+          exit 1
+        fi
+        echo "🔍 Discovered ${EXPECTED} items. Fetching with concurrency=${CONCURRENCY}, max_retries=${MAX_RETRIES}"
+
+        # Concurrent fetch: each worker writes its value to its own file (no shared-write races)
+        # and appends per-attempt failures to retry/failure logs.
+        export VAULT MAX_RETRIES SECRETS_DIR FAILURES_FILE RETRIES_FILE
+        xargs -P "${CONCURRENCY}" -I {} bash -c '
+          ITEM="$1"
+          for attempt in $(seq 1 "${MAX_RETRIES}"); do
+            if value=$(op read "op://${VAULT}/${ITEM}/password" 2>/dev/null); then
+              printf "%s" "$value" > "${SECRETS_DIR}/${ITEM}"
+              exit 0
+            fi
+            echo "${ITEM} attempt=${attempt}" >> "${RETRIES_FILE}"
+            if [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+              sleep 1
+            fi
+          done
+          echo "${ITEM}" >> "${FAILURES_FILE}"
+          exit 0
+        ' _ {} < "$ITEM_LIST"
+
+        FETCHED=$(find "$SECRETS_DIR" -type f | wc -l | tr -d ' ')
+        RETRIED=$(grep -c . "$RETRIES_FILE" 2>/dev/null || true); RETRIED=${RETRIED:-0}
+        FAILED_COUNT=$(grep -c . "$FAILURES_FILE" 2>/dev/null || true); FAILED_COUNT=${FAILED_COUNT:-0}
+
+        echo "📊 Fetched ${FETCHED}/${EXPECTED} | retries=${RETRIED} | failed=${FAILED_COUNT}"
+        if [ "${FAILED_COUNT}" -gt 0 ]; then
+          echo "❌ Failed to fetch the following items after ${MAX_RETRIES} attempts:"
+          cat "$FAILURES_FILE"
+          exit 1
+        fi
+
+        # Write .env file header.
+        {
+          echo "# ================================================"
+          echo "# Environment Configuration"
+          echo "# Source: 1Password/${VAULT}"
+          echo "# Generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "# ================================================"
+          echo "# DO NOT COMMIT THIS FILE TO GIT"
+          echo "# ================================================"
+          echo ""
+        } > "$ENV_FILE"
+
+        # Walk the fetched secrets, mask each value in logs, and append to the .env file.
+        WRITTEN=0
+        SKIPPED=0
+        while IFS= read -r item_file; do
+          name="$(basename "$item_file")"
+          value="$(cat "$item_file")"
+
+          if [ -z "$value" ]; then
+            echo "⚠️  Skipping ${name} (empty value in vault)"
+            SKIPPED=$((SKIPPED + 1))
+            continue
+          fi
+
+          # Mask in workflow logs before doing anything else with the value.
+          echo "::add-mask::${value}"
+
+          # Smart-quote values containing whitespace or shell metacharacters.
+          # Order matters: escape backslashes first, then the others, so the
+          # escapes we add don't themselves get double-escaped.
+          if [[ "$value" =~ [[:space:]] ]] || [[ "$value" =~ [\$\`\\\"] ]]; then
+            escaped="${value//\\/\\\\}"
+            escaped="${escaped//\"/\\\"}"
+            escaped="${escaped//\$/\\\$}"
+            escaped="${escaped//\`/\\\`}"
+            printf '%s="%s"\n' "$name" "$escaped" >> "$ENV_FILE"
+          else
+            printf '%s=%s\n' "$name" "$value" >> "$ENV_FILE"
+          fi
+          WRITTEN=$((WRITTEN + 1))
+        done < <(find "$SECRETS_DIR" -type f | sort)
+
+        echo "✅ ${ENV_FILE} created — ${WRITTEN} written, ${SKIPPED} skipped"
+
+    - name: Verify .env file
+      shell: bash
+      run: |
+        ENV_FILE=".env.${{ inputs.environment }}"
+
+        if [ ! -f "${ENV_FILE}" ]; then
+          echo "❌ ${ENV_FILE} was not created"
+          exit 1
+        fi
+
+        COUNT=$(grep -c '^[A-Z_][A-Z0-9_]*=' "${ENV_FILE}" || echo 0)
+        echo "✅ ${ENV_FILE} exists (${COUNT} variables, $(wc -c < "${ENV_FILE}") bytes)"

@@ -1,0 +1,71 @@
+version: '3'
+
+# =============================================================================
+# Project values are read from .setup.config (written by ./setup.sh).
+# To change APP_NAME or EXTERNAL_PORT, edit .setup.config and re-run any task.
+# =============================================================================
+
+vars:
+  APP_NAME:
+    sh: . ./.setup.config && echo "$APP_NAME"
+  EXTERNAL_PORT:
+    sh: . ./.setup.config && echo "$EXTERNAL_PORT"
+
+env:
+  # Allow Task-run commands to bypass docker guardrails
+  APP_ALLOW_DOCKER: "1"
+  # Docker Compose project name - scopes all containers/networks/volumes
+  COMPOSE_PROJECT_NAME: "{{.APP_NAME}}"
+  # Pass port to docker-compose
+  EXTERNAL_PORT: "{{.EXTERNAL_PORT}}"
+  # Source compose variable substitution from .env.local (compose default is .env, which we don't use)
+  COMPOSE_ENV_FILES: ".env.local"
+
+# Include modular Taskfiles
+includes:
+  env:
+    taskfile: ./tasks/env.yml
+    dir: .
+  helpers:
+    taskfile: ./tasks/helpers.yml
+    dir: .
+
+tasks:
+  default:
+    desc: "List all available tasks"
+    aliases: [help]
+    silent: true
+    cmds:
+      - task --list
+
+  start:
+    desc: "Start the dev environment (generates .env if missing, builds & restarts containers)"
+    cmds:
+      - task: helpers:dev_smart
+
+  down:
+    desc: "Stop the dev environment (docker compose down)"
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: "Tail backend container logs"
+    cmds:
+      - docker compose logs -f backend
+
+  test:
+    desc: "Run the backend test suite inside the container"
+    cmds:
+      - docker compose exec backend uv run pytest -v
+
+  clean:
+    desc: "Stop containers and prune dangling images (keeps volumes & built images)"
+    cmds:
+      - task: helpers:clean_environment
+
+  clean:all:
+    desc: "Wipe everything: containers, volumes, project images, venv, caches"
+    cmds:
+      - task: helpers:clean_environment
+        vars:
+          ALL: "true"
