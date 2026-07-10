@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="164" height="32" viewBox="0 0 164 32" role="img" aria-label="Use this template button">
+  <rect width="164" height="32" rx="6" fill="#238636"/>
+  <text x="14" y="21" textLength="112" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" fill="#ffffff">Use this template</text>
+  <path d="M138 14 h12 l-6 6 z" fill="#ffffff"/>
+</svg>

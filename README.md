@@ -1,5 +1,7 @@
 # FastAPI 1Password Template
 
+> <sub>⚠️ This is a **template repository** — don't clone or fork it to start a project. Use GitHub's **"Use this template"** button so your new repo starts with a clean history and its own `origin`. See [Quick Start](#quick-start).</sub>
+
 Production-ready FastAPI backend template with 1Password secrets management, PostgreSQL, and 4-layer architecture (API → Service → Provider → DAO).
 
 ## What's wired up
@@ -23,7 +25,20 @@ Everything else (Homebrew, Task, Docker Desktop, 1Password CLI, jq) is installed
 
 ## Quick Start
 
-If you're starting a new project from this template, run the setup wizard:
+This is a GitHub [template repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template). Start a new project from it with the **"Use this template"** button at the top of the repo page on GitHub:
+
+<img src=".github/assets/use-this-template.svg" alt="Use this template button" width="164">
+
+Or from the CLI:
+
+```bash
+gh repo create my-new-api --template HEAL-Engineering/fastapi-1password-template --private --clone
+cd my-new-api
+```
+
+Your new repo starts with a single fresh commit and its own `origin` — no template history, nothing to detach.
+
+Then run the setup wizard:
 
 ```bash
 ./setup.sh
@@ -37,7 +52,6 @@ The wizard walks you through:
 4. Picking which optional secret groups to seed (`test`, `sentry`, `config`)
 5. Creating the `{PREFIX}-LOCAL` 1Password vault and seeding it with secrets (JWT key + DB password auto-generated)
 6. Verifying end-to-end by generating `.env.local`
-7. Optionally detaching from the template's git history (fresh-start your project)
 
 Only the `-LOCAL` vault is created by the wizard. `-TEST` and `-PROD` vaults can be added later as you need them.
 

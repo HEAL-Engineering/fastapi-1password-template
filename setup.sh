@@ -411,7 +411,7 @@ step_create_and_seed_vaults() {
 }
 
 # =============================================================================
-# Step 7 — Persist .setup.config
+# Persist .setup.config
 # =============================================================================
 write_config() {
     local mark_complete="${1:-0}"
@@ -461,53 +461,7 @@ step_verify() {
 }
 
 # =============================================================================
-# Step 7 — Detach from template (optional)
-# =============================================================================
-step_detach_git() {
-    print_header "Step 7 — Detach from the template (optional)"
-
-    if [ ! -d "${REPO_ROOT}/.git" ]; then
-        log_info "No .git directory; nothing to detach."
-        return 0
-    fi
-
-    local current_remote=""
-    if git -C "$REPO_ROOT" remote | grep -q '^origin$'; then
-        current_remote="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
-    fi
-
-    if [ -n "$current_remote" ]; then
-        log_info "Current 'origin' remote: $current_remote"
-    else
-        log_info "No 'origin' remote configured."
-    fi
-
-    local action
-    action="$(ask_choose "How would you like to handle git for this project?" \
-        "Fresh start (wipe .git, re-init as a new project)" \
-        "Leave it alone")"
-
-    case "$action" in
-        "Fresh start"*)
-            log_warn "This deletes ALL git history (including the template's commits)."
-            if ask_confirm "Wipe .git and reinitialize? This cannot be undone."; then
-                rm -rf "${REPO_ROOT}/.git"
-                git -C "$REPO_ROOT" init -b main >/dev/null
-                log_ok "Fresh git repo initialized on branch 'main'."
-                log_info "Next: git add -A && git commit -m 'Initial commit'"
-                log_info "Then: git remote add origin <your-new-repo-url>"
-            else
-                log_info "Skipped — git history left intact."
-            fi
-            ;;
-        *)
-            log_info "Leaving git as-is."
-            ;;
-    esac
-}
-
-# =============================================================================
-# Step 10 — Final summary
+# Final summary
 # =============================================================================
 step_summary() {
     local vault_list="(none)" count_lines=""
@@ -576,7 +530,6 @@ main() {
     step_create_and_seed_vaults
     write_config 1
     step_verify
-    step_detach_git
     step_summary
 }
 

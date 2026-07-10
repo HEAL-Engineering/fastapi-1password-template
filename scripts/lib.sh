@@ -252,37 +252,30 @@ prompt_op_account() {
     fi
 
     printf '\n%sMultiple 1Password accounts detected.%s\n' "$C_BOLD" "$C_RESET" >&2
-
-    local i uuid email url short_uuid locked_any=0
-    for i in $(seq 0 $((count - 1))); do
-        uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
-        if op vault list --account "$uuid" >/dev/null 2>&1; then continue; fi
-
-        email="$(    printf '%s' "$accounts_json" | jq -r ".[$i].email")"
-        url="$(      printf '%s' "$accounts_json" | jq -r ".[$i].url")"
-        short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
-        locked_any=1
-
-        log_warn "Account [$short_uuid] $email @ $url is locked."
-        if ask_confirm "Unlock it now (Touch ID / master password) to show its vaults?"; then
-            if ! op signin --account "$uuid" >/dev/null 2>&1; then
-                log_warn "Unlock failed — this account will show without vault info."
-            fi
-        fi
-    done
-    [ "$locked_any" -eq 1 ] && printf '\n' >&2
-
     printf 'Showing vaults in each account so you can tell them apart:\n' >&2
+    printf '%s(If an unlock prompt appears for an account you don'\''t plan to use, cancel it once — it won'\''t re-prompt.)%s\n' "$C_DIM" "$C_RESET" >&2
 
-    local uuids=() labels=() vaults
+    # Each account's vault list is fetched exactly once. A locked account
+    # triggers at most one desktop-app unlock prompt (the initial list attempt);
+    # declining it just hides that account's vaults — no second prompt.
+    local i uuid email url short_uuid
+    local uuids=() labels=() vaults_json vaults
     for i in $(seq 0 $((count - 1))); do
         email="$(printf '%s' "$accounts_json" | jq -r ".[$i].email")"
         url="$(  printf '%s' "$accounts_json" | jq -r ".[$i].url")"
         uuid="$( printf '%s' "$accounts_json" | jq -r ".[$i].user_uuid")"
         short_uuid="$(printf '%s' "$uuid" | cut -c1-8)"
 
-        vaults="$(op vault list --account "$uuid" --format json 2>/dev/null \
-            | jq -r 'map(.name) | join(", ")' 2>/dev/null || true)"
+        vaults_json="$(op vault list --account "$uuid" --format json 2>/dev/null || true)"
+        if [ -z "$vaults_json" ]; then
+            log_warn "Account [$short_uuid] $email @ $url is locked."
+            if ask_confirm "Unlock it (Touch ID / master password) to show its vaults?"; then
+                vaults_json="$(op vault list --account "$uuid" --format json 2>/dev/null || true)"
+                [ -z "$vaults_json" ] && log_warn "Unlock failed — this account will show without vault info."
+            fi
+        fi
+
+        vaults="$(printf '%s' "$vaults_json" | jq -r 'map(.name) | join(", ")' 2>/dev/null || true)"
         if [ -z "$vaults" ]; then
             vaults="(locked — vaults hidden)"
         elif [ "${#vaults}" -gt 90 ]; then
